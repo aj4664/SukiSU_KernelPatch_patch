@@ -23,8 +23,9 @@
 *.so.*
 *.dylib
 
-/build/*
+build/*
 
+preset.h
 kptools
 
 # 

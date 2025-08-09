@@ -10,6 +10,7 @@
 #include <io.h>
 #include <symbol.h>
 #include "hmem.h"
+#include <hook_patch.h>
 
 #define bits32(n, high, low) ((uint32_t)((n) << (31u - (high))) >> (31u - (high) + (low)))
 #define bit(n, st) (((n) >> (st)) & 1)
@@ -603,32 +604,33 @@ KP_EXPORT_SYMBOL(hook_prepare);
 // todo:
 void hook_install(hook_t *hook)
 {
-    uint64_t va = hook->origin_addr;
-    uint64_t *entry = pgtable_entry_kernel(va);
-    uint64_t ori_prot = *entry;
-    modify_entry_kernel(va, entry, (ori_prot | PTE_DBM) & ~PTE_RDONLY);
-    // todo: cpu_stop_machine
-    // todo: can use aarch64_insn_patch_text_nosync, aarch64_insn_patch_text directly?
-    for (int32_t i = 0; i < hook->tramp_insts_num; i++) {
-        *((uint32_t *)hook->origin_addr + i) = hook->tramp_insts[i];
-    }
-    flush_icache_all();
-    modify_entry_kernel(va, entry, ori_prot);
+    CPU_STOP_MACHINE_BEGIN();
+    
+    SAFE_PATCH_WITH_CHECK(hook->origin_addr, hook->tramp_insts, 
+                          hook->tramp_insts_num, install_error);
+    
+    CPU_STOP_MACHINE_END();
+    return;
+
+install_error:
+    CPU_STOP_MACHINE_END();
+    logkv("Hook install failed for address: %llx\n", hook->origin_addr);
 }
 KP_EXPORT_SYMBOL(hook_install);
 
 void hook_uninstall(hook_t *hook)
 {
-    uint64_t va = hook->origin_addr;
-    uint64_t *entry = pgtable_entry_kernel(va);
-    uint64_t ori_prot = *entry;
-    modify_entry_kernel(va, entry, (ori_prot | PTE_DBM) & ~PTE_RDONLY);
-    flush_tlb_kernel_page(va);
-    for (int32_t i = 0; i < hook->tramp_insts_num; i++) {
-        *((uint32_t *)hook->origin_addr + i) = hook->origin_insts[i];
-    }
-    flush_icache_all();
-    modify_entry_kernel(va, entry, ori_prot);
+    CPU_STOP_MACHINE_BEGIN();
+    
+    SAFE_PATCH_WITH_CHECK(hook->origin_addr, hook->origin_insts, 
+                          hook->tramp_insts_num, uninstall_error);
+    
+    CPU_STOP_MACHINE_END();
+    return;
+
+uninstall_error:
+    CPU_STOP_MACHINE_END();
+    logkv("Hook uninstall failed for address: %llx\n", hook->origin_addr);
 }
 KP_EXPORT_SYMBOL(hook_uninstall);
 
